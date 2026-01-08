@@ -49,6 +49,32 @@ max_tries = args.max_tries
 max_threads = args.max_threads
 token = args.token
 
+def safe_request(url, params=None, headers=None):
+    while True:
+        response = requests.get(url, params=params, headers=headers)
+        if response.status_code == 429:
+            # CivitAI usually provides a 'Retry-After' header, but 10s is a safe default
+            wait_time = int(response.headers.get("Retry-After", 10))
+            print(f"Rate limited (429). Waiting {wait_time} seconds...")
+            time.sleep(wait_time)
+            continue
+        return response
+
+def safe_session_get(session, url, **kwargs):
+    """
+    Handles 429 errors for a requests.Session call.
+    Usage: response = safe_session_get(session, url, stream=True, timeout=(20, 40))
+    """
+    while True:
+        response = session.get(url, **kwargs)
+        if response.status_code == 429:
+            # Check for 'Retry-After' header, default to 30s for downloads
+            wait_time = int(response.headers.get("Retry-After", 30))
+            print(f"\n[429] Rate limited. Retrying in {wait_time}s...")
+            time.sleep(wait_time)
+            continue
+        return response
+        
 # Function to sanitize directory names
 def sanitize_directory_name(name):
     return name.rstrip()  # Remove trailing whitespace characters
@@ -132,7 +158,7 @@ def download_file_or_image(url, output_path, retry_count=0, max_retries=max_trie
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     progress_bar = None
     try:
-        response = session.get(url, stream=True, timeout=(20, 40))
+        response = safe_session_get(session,url, stream=True, timeout=(20, 40))
         if response.status_code == 404:
             print(f"File not found: {url}")
             return False
@@ -359,7 +385,7 @@ def process_username(username, download_type):
 
         while retry_count < max_retries:
             try:
-                response = session.get(next_page, headers=headers)
+                response = safe_session_get(session,next_page, headers=headers)
                 response.raise_for_status()
                 data = response.json()
                 break  # Exit retry loop on successful response
